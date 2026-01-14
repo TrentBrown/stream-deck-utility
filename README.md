@@ -8,7 +8,7 @@ A command-line utility for managing Stream Deck profiles across multiple devices
 - Copy individual profiles between devices
 - Copy all profiles from one device to another in a single operation
 - Automatically remap profile references (for "Switch Profile" buttons)
-- Preserve device preferences (default profile, sort order)
+- Regenerate page UUIDs to prevent conflicts between source and copied profiles
 - Delete profiles with confirmation prompts
 
 ## Installation
@@ -84,9 +84,9 @@ Copies a profile to another device.
 
 Copies all profiles from one device to another. This command:
 
-- Copies all profile directories
+- Copies all profile directories with new UUIDs
+- Regenerates page UUIDs to prevent conflicts with source profiles
 - Remaps internal profile references (so "Switch Profile" buttons work correctly)
-- Copies device preferences (default profile, sort order)
 
 **Options:**
 
@@ -128,18 +128,15 @@ Each profile is a `.sdProfile` directory containing:
 - `manifest.json` - Profile metadata and device binding
 - `Profiles/` - Subdirectory containing page definitions
 
-Device preferences (default profile, sort order) are stored in the macOS preferences system:
-
-```
-~/Library/Preferences/com.elgato.StreamDeck.plist
-```
-
 When copying profiles, this utility:
 
 1. Copies the profile directory with a new UUID
-2. Updates the device binding in the manifest
-3. Remaps any "Switch Profile" action references to point to the new profile UUIDs
-4. Copies device preferences with remapped profile references
+2. Regenerates all page UUIDs within the profile (prevents Stream Deck from confusing source and copied profiles)
+3. Updates the device binding in the manifest
+4. Remaps page references in the profile manifest
+5. Remaps any "Switch Profile" action references to point to the new profile UUIDs
+
+**Note:** Device preferences (default profile, sort order) are stored in `~/Library/Preferences/com.elgato.StreamDeck.plist` but are not modified by this tool. You may need to set the default profile manually in the Stream Deck app after copying.
 
 ## Notes
 
@@ -150,7 +147,7 @@ When copying profiles, this utility:
 ## Requirements
 
 - Node.js 18+
-- macOS (uses PlistBuddy for preference management)
+- macOS (uses PlistBuddy for reading device names)
 - Stream Deck software installed
 
 ## License
