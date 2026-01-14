@@ -230,7 +230,7 @@ profiles
 
             console.log(`\nCopying ${sourceDevice.profiles.length} profile(s) from ${sourceDevice.model} to ${targetDevice.model}...\n`);
 
-            const { profiles: results, preferences } = await copyAllProfiles(
+            const { profiles: results } = await copyAllProfiles(
                 sourceDevice.uuid,
                 targetDevice.uuid,
                 targetDevice.model
@@ -263,20 +263,9 @@ profiles
             console.log('─'.repeat(80));
             console.log(`\nSummary: ${successCount} copied, ${failCount} failed, ${totalRemapped} profile references remapped`);
 
-            // Show preferences that were copied
-            if (preferences.target.preferred) {
-                // Find the profile name for the default
-                const defaultProfile = results.find(r => r.id.toLowerCase() === preferences.target.preferred);
-                const defaultName = defaultProfile?.name || preferences.target.preferred;
-                console.log(`\nDefault profile set to: ${defaultName}`);
-            }
-
-            if (preferences.target.sorting.length > 0) {
-                console.log(`Profile sort order copied (${preferences.target.sorting.length} profiles)`);
-            }
-
             if (successCount > 0) {
                 console.log('\nRestart Stream Deck app to see the new profiles.');
+                console.log('Note: You may need to set the default profile manually in Stream Deck settings.');
             }
         } catch (err) {
             console.error('Error copying profiles:', err.message);

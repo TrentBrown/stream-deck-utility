@@ -229,7 +229,10 @@ export async function copyProfile(sourceProfileId, targetDeviceUuid, targetDevic
     // Copy the entire profile directory
     await cp(sourceProfile.path, newProfilePath, { recursive: true });
 
-    // Update the manifest with new device info
+    // Regenerate page UUIDs to avoid conflicts with source profile
+    const pageUuidMapping = await regeneratePageUuids(newProfilePath);
+
+    // Update the manifest with new device info and remapped page UUIDs
     const manifestPath = join(newProfilePath, 'manifest.json');
     const manifestData = await readFile(manifestPath, 'utf-8');
     const manifest = JSON.parse(manifestData);
@@ -239,14 +242,116 @@ export async function copyProfile(sourceProfileId, targetDeviceUuid, targetDevic
         UUID: targetDeviceUuid
     };
 
+    // Remap page references in the profile manifest
+    if (manifest.Pages) {
+        if (manifest.Pages.Current && pageUuidMapping.has(manifest.Pages.Current.toLowerCase())) {
+            manifest.Pages.Current = pageUuidMapping.get(manifest.Pages.Current.toLowerCase());
+        }
+        if (manifest.Pages.Default && pageUuidMapping.has(manifest.Pages.Default.toLowerCase())) {
+            manifest.Pages.Default = pageUuidMapping.get(manifest.Pages.Default.toLowerCase());
+        }
+        if (manifest.Pages.Pages && Array.isArray(manifest.Pages.Pages)) {
+            manifest.Pages.Pages = manifest.Pages.Pages.map(pageId => {
+                const lowerId = pageId.toLowerCase();
+                return pageUuidMapping.has(lowerId) ? pageUuidMapping.get(lowerId) : pageId;
+            });
+        }
+    }
+
     await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
 
     return {
         id: newProfileId,
         path: newProfilePath,
         originalId: sourceProfileId,
-        name: manifest.Name
+        name: manifest.Name,
+        pageUuidMapping
     };
+}
+
+async function regeneratePageUuids(profilePath) {
+    const pagesPath = join(profilePath, 'Profiles');
+    const pageUuidMapping = new Map(); // oldUuid -> newUuid
+
+    try {
+        const entries = await readdir(pagesPath, { withFileTypes: true });
+
+        for (const entry of entries) {
+            if (entry.isDirectory()) {
+                const oldPageId = entry.name;
+                const newPageId = randomUUID().toUpperCase();
+                const oldPagePath = join(pagesPath, oldPageId);
+                const newPagePath = join(pagesPath, newPageId);
+
+                // Store the mapping (lowercase for consistent lookup)
+                pageUuidMapping.set(oldPageId.toLowerCase(), newPageId.toLowerCase());
+
+                // Rename the page directory
+                await cp(oldPagePath, newPagePath, { recursive: true });
+                await rm(oldPagePath, { recursive: true });
+            }
+        }
+
+        // Now update any internal page references within the page manifests
+        await remapPageReferencesInProfile(pagesPath, pageUuidMapping);
+
+    } catch (err) {
+        // No pages directory or error during processing
+        console.error(`Warning: Error regenerating page UUIDs: ${err.message}`);
+    }
+
+    return pageUuidMapping;
+}
+
+async function remapPageReferencesInProfile(pagesPath, pageUuidMapping) {
+    try {
+        const entries = await readdir(pagesPath, { withFileTypes: true });
+
+        for (const entry of entries) {
+            if (entry.isDirectory()) {
+                const pageManifestPath = join(pagesPath, entry.name, 'manifest.json');
+                try {
+                    const manifestData = await readFile(pageManifestPath, 'utf-8');
+                    let manifest = JSON.parse(manifestData);
+                    let modified = false;
+
+                    // Recursively search and replace page UUID references
+                    const remapInObject = (obj) => {
+                        if (!obj || typeof obj !== 'object') return;
+
+                        if (Array.isArray(obj)) {
+                            for (const item of obj) {
+                                remapInObject(item);
+                            }
+                        } else {
+                            for (const key of Object.keys(obj)) {
+                                // Look for PageUUID references (for page navigation actions)
+                                if (key === 'PageUUID' && typeof obj[key] === 'string') {
+                                    const oldUuid = obj[key].toLowerCase();
+                                    if (pageUuidMapping.has(oldUuid)) {
+                                        obj[key] = pageUuidMapping.get(oldUuid);
+                                        modified = true;
+                                    }
+                                } else if (typeof obj[key] === 'object') {
+                                    remapInObject(obj[key]);
+                                }
+                            }
+                        }
+                    };
+
+                    remapInObject(manifest);
+
+                    if (modified) {
+                        await writeFile(pageManifestPath, JSON.stringify(manifest, null, 2));
+                    }
+                } catch (err) {
+                    // Skip pages with invalid manifests
+                }
+            }
+        }
+    } catch (err) {
+        // No pages directory
+    }
 }
 
 async function remapProfileReferences(profilePath, uuidMapping) {
@@ -337,48 +442,11 @@ export async function copyAllProfiles(sourceDeviceUuid, targetDeviceUuid, target
         }
     }
 
-    // Phase 3: Copy device preferences (default profile, sorting, expanded)
-    const sourcePrefs = getDevicePreferences(sourceDeviceUuid);
-    const remappedPrefs = {
-        preferred: null,
-        sorting: [],
-        expanded: []
-    };
-
-    // Remap the preferred (default) profile
-    if (sourcePrefs.preferred) {
-        const newUuid = uuidMapping.get(sourcePrefs.preferred.toLowerCase());
-        if (newUuid) {
-            remappedPrefs.preferred = newUuid.toLowerCase();
-        }
-    }
-
-    // Remap the sorting order
-    for (const uuid of sourcePrefs.sorting) {
-        const newUuid = uuidMapping.get(uuid.toLowerCase());
-        if (newUuid) {
-            remappedPrefs.sorting.push(newUuid.toLowerCase());
-        }
-    }
-
-    // Remap the expanded profiles
-    for (const uuid of sourcePrefs.expanded) {
-        const newUuid = uuidMapping.get(uuid.toLowerCase());
-        if (newUuid) {
-            remappedPrefs.expanded.push(newUuid.toLowerCase());
-        }
-    }
-
-    // Write the remapped preferences to the target device
-    if (remappedPrefs.preferred || remappedPrefs.sorting.length > 0) {
-        setDevicePreferences(targetDeviceUuid, remappedPrefs);
-    }
+    // Note: Device preferences (default profile, sorting) are NOT copied
+    // because modifying the plist can corrupt Stream Deck's profile data.
+    // Users should set the default profile manually in the Stream Deck app.
 
     return {
-        profiles: results,
-        preferences: {
-            source: sourcePrefs,
-            target: remappedPrefs
-        }
+        profiles: results
     };
 }
