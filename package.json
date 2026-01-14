@@ -1,0 +1,20 @@
+{
+    "name": "stream-deck-utility",
+    "version": "1.0.0",
+    "description": "CLI utility for managing Stream Deck profiles across devices",
+    "main": "src/cli.js",
+    "type": "module",
+    "scripts": {
+        "start": "node src/cli.js"
+    },
+    "keywords": [
+        "stream-deck",
+        "elgato",
+        "cli"
+    ],
+    "author": "",
+    "license": "MIT",
+    "dependencies": {
+        "commander": "^12.1.0"
+    }
+}
